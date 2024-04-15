@@ -8,8 +8,8 @@ class Donnees(torch.utils.data.Dataset):
         self.liste_IDs = liste_IDs
 
   def len(self):
-       "Représente le nombre total d'exemples du jeu de données"
-        return len(self.liste_IDs)
+        "Représente le nombre total d'exemples du jeu de données"
+        return len(self.liste_IDs) 
 
   def getitem(self, indice):
         'Génère un exemple à partir du jeu de données'
