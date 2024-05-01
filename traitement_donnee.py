@@ -14,19 +14,21 @@ class SpectreDataset(Dataset):
 
     def __getitem__(self, idx):
         filename = self.file_list[idx]
-        data_list = self.lire_spectre(filename)
+        data_list = []
+        with open(os.path.join(self.root_dir,filename), 'r') as fichier:
+            for ligne in fichier:
+                data_list.append(float(ligne))
         classe = find_classe(filename)
-        return data_list, classe
+        return torch.tensor(data_list), classe
 
     def lire_spectre(self, filename):
-        data_list = torch.tensor([])  # Créer un tensor vide
+        data_list = []
         filepath = os.path.join(self.root_dir, filename)
         
         try:
             with open(filepath, 'r') as fichier:
                 for ligne in fichier:
-                    nouvel_element = torch.tensor([float(ligne)])  # Convertir la ligne en flottant
-                    data_list = torch.cat((data_list, nouvel_element), dim=0)  # Concaténer le nouvel élément au tensor existant
+                    data_list.append(float(ligne))
 
         except FileNotFoundError:
             print("Le fichier spécifié n'a pas été trouvé.")
@@ -39,69 +41,57 @@ class SpectreDataset(Dataset):
         return data_list
 
 
-    def data_padding(self):
-        padding_x = []
-        cpt = 0
+    # def data_padding(self):
+    #     padding_x = []
+    #     cpt = 0
 
-        # Parcourir tous les fichiers pour collecter les valeurs de x et y
-        for filename in self.file_list:
-            cpt+=1
-            filepath = os.path.join(self.root_dir, filename)
-            data_dict = self.lire_spectre(filepath)
-            for key in data_dict.keys():
-                if key not in padding_x:
-                    padding_x.append(key)
-            print(f"Fichier {cpt}/{len(self.file_list)} traité avec succès")
+    #     # Parcourir tous les fichiers pour collecter les valeurs de x et y
+    #     for filename in self.file_list:
+    #         cpt+=1
+    #         filepath = os.path.join(self.root_dir, filename)
+    #         data_dict = self.lire_spectre(filepath)
+    #         for key in data_dict.keys():
+    #             if key not in padding_x:
+    #                 padding_x.append(key)
+    #         print(f"Fichier {cpt}/{len(self.file_list)} traité avec succès")
             
-        print("Step 1: Done")
+    #     print("Step 1: Done")
 
-        # Créer le dossier "Donnee_padding" s'il n'existe pas déjà
-        dossier_padding = os.path.join("Donnee_padding")
-        if not os.path.exists(dossier_padding):
-            os.makedirs(dossier_padding)
+    #     # Créer le dossier "Donnee_padding" s'il n'existe pas déjà
+    #     dossier_padding = os.path.join("Donnee_padding")
+    #     if not os.path.exists(dossier_padding):
+    #         os.makedirs(dossier_padding)
 
-        # Parcourir à nouveau tous les fichiers pour ajouter les valeurs manquantes
-        cpt = 0
-        for filename in self.file_list:
-            cpt+=1
-            filepath = os.path.join(self.root_dir, filename)
-            data_dict = self.lire_spectre(filepath)
+    #     # Parcourir à nouveau tous les fichiers pour ajouter les valeurs manquantes
+    #     cpt = 0
+    #     for filename in self.file_list:
+    #         cpt+=1
+    #         filepath = os.path.join(self.root_dir, filename)
+    #         data_dict = self.lire_spectre(filepath)
 
-            for value in padding_x:
-                if value not in data_dict.keys():
-                    data_dict[value] = 0
+    #         for value in padding_x:
+    #             if value not in data_dict.keys():
+    #                 data_dict[value] = 0
 
-            # Tri des valeurs du dictionnaire
-            sorted_dict = dict(sorted(data_dict.items()))
+    #         # Tri des valeurs du dictionnaire
+    #         sorted_dict = dict(sorted(data_dict.items()))
 
-            # Chemin du fichier de sortie dans le dossier "Donnee_padding"
-            file_path = os.path.join(dossier_padding, filename)
+    #         # Chemin du fichier de sortie dans le dossier "Donnee_padding"
+    #         file_path = os.path.join(dossier_padding, filename)
 
-            # Écrire les données triées avec les valeurs manquantes ajoutées
-            with open(file_path, "w") as fichier_sortie:
-                for x, y in sorted_dict.items():
-                    fichier_sortie.write(f"{x} {y}\n")
-                print(f"Fichier {cpt}/{len(self.file_list)} traité avec succès")
+    #         # Écrire les données triées avec les valeurs manquantes ajoutées
+    #         with open(file_path, "w") as fichier_sortie:
+    #             for x, y in sorted_dict.items():
+    #                 fichier_sortie.write(f"{x} {y}\n")
+    #             print(f"Fichier {cpt}/{len(self.file_list)} traité avec succès")
 
 
 numbers = "0123456789"
 def find_classe(filename):
-    if(filename[2] in numbers):
-        if(filename[0] == "R"):
-            return 1
-        else:
-            return 4
+    if(filename[0] == "R"):
+        return 0
     else:
-        if(filename[5] == "+"):
-            if(filename[0] == "R"):
-                return 2
-            else:
-                return 3
-        else:
-            if(filename[0] == "R"):
-                return 5
-            else:
-                return 6
+        return 1
 
 from torch_geometric.loader import DataLoader
 

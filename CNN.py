@@ -5,73 +5,71 @@ from torch_geometric.loader import DataLoader
 from torchvision.transforms import ToTensor
 from torch import optim
 import matplotlib.pyplot as plt
+import multiprocessing
 from traitement_donnee import SpectreDataset
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-data = SpectreDataset("Donnée20")
 
 # Données entrainement, validation et test
-train_data = DataLoader(data, batch_size=64, shuffle=True),
-validation_data = DataLoader(data, batch_size=64, shuffle=False),
-test_data = DataLoader(data, batch_size=64, shuffle=False),
+train_data = DataLoader(SpectreDataset("Donnee50")
+, batch_size=4, shuffle=True, num_workers = 4, drop_last = True),
+validation_data = DataLoader(SpectreDataset("Donnee30")
+, batch_size=4, shuffle=False, num_workers = 4, drop_last = True),
+test_data = DataLoader(SpectreDataset("Donnee20")
+, batch_size=4, shuffle=False, num_workers = 4, drop_last = True),
 
 
-def calculate_metrics(predictions, labels, num_classes):
-    # Convertir les prédictions en classes prédites
-    _, predicted_classes = torch.max(predictions, 1)
-    
-    # Initialiser les compteurs pour TP, TN, FP et FN pour chaque classe
-    TP = torch.zeros(num_classes)
-    TN = torch.zeros(num_classes)
-    FP = torch.zeros(num_classes)
-    FN = torch.zeros(num_classes)
-    
-    # Calculer TP, TN, FP et FN pour chaque classe
-    for i in range(num_classes):
-        TP[i] = torch.sum((predicted_classes == i) & (labels == i)).item()
-        TN[i] = torch.sum((predicted_classes != i) & (labels != i)).item()
-        FP[i] = torch.sum((predicted_classes == i) & (labels != i)).item()
-        FN[i] = torch.sum((predicted_classes != i) & (labels == i)).item()
-    
-    # Calculer les valeurs nécessaires pour les métriques
+def calculate_metrics(predictions, labels, nb_classes):
+
+    conf_matrix = torch.zeros(nb_classes, nb_classes)
+    for t, p in zip(labels, predictions):
+        conf_matrix[t, p] += 1
+
+
+    TP = conf_matrix.diag()
+    TN = torch.zeros(nb_classes)
+    FP = torch.zeros(nb_classes)
+    FN = torch.zeros(nb_classes)
+    for c in range(nb_classes):
+        idx = torch.ones(nb_classes, dtype=torch.bool)
+        idx[c] = 0
+        # all non-class samples classified as non-class
+        TN[c] = conf_matrix[idx.nonzero()[:, None], idx.nonzero()].sum() #conf_matrix[idx[:, None], idx].sum() - conf_matrix[idx, c].sum()
+        # all non-class samples classified as class
+        FP[c] = conf_matrix[idx, c].sum()
+        # all class samples not classified as class
+        FN[c] = conf_matrix[c, idx].sum()
+
     P = TP + FN
     N = TN + FP
-    
-    # Calculer les métriques
-    accuracy = torch.sum(TP + TN) / torch.sum(P + N)
+
+    accuracy = torch.sum((TP)) / len(labels)
     sensitivity = TP / P
     specificity = TN / N
-    
+        
     return accuracy, sensitivity, specificity
 
 
 class CNN(nn.Module):
     def __init__(self):
         super(CNN, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=5, stride=1, padding=2)
-        self.conv2 = nn.Conv1d(32, 32, kernel_size=5, stride=1, padding=2)
-        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.fc1 = nn.Linear(186389, 128)  
-        self.fc2 = nn.Linear(128, 6)  
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=4, kernel_size=2)
+        self.conv2 = nn.Conv1d(4, 8, kernel_size=2)
+        self.pool = nn.MaxPool1d(kernel_size=2)
+        self.fc1 = nn.Linear(5964448, 64)  
+        self.fc2 = nn.Linear(64, 32)  
+        self.fc3 = nn.Linear(32,2)
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.pool(F.relu(x))
+        x= F.relu(x)
         x = self.conv2(x)
-        x = self.pool(F.relu(x))
+        x = x.view(4,-1)
         x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
         return x
-
-
-model = CNN()
-model.to(device)
-loss_function = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.01)
-
-
-num_epochs = 100
 
 
 def train(model, loader, criterion, optimizer):
@@ -79,8 +77,7 @@ def train(model, loader, criterion, optimizer):
     for spectres, labels in loader:
         spectres = spectres.to(device)
         labels = labels.to(device)
-        out = model(spectres)
-        pred = out.argmax(dim=1)
+        out = model(spectres.unsqueeze(1))
         loss = criterion(out, labels)
         loss.backward() 
         optimizer.step()
@@ -94,10 +91,11 @@ def test(model, loader, criterion, num_classes):
     all_labels = []
     total_loss = 0
     with torch.no_grad():
+
         for spectres, labels in loader:
             spectres = spectres.to(device)
             labels = labels.to(device)
-            out = model(spectres)
+            out = model(spectres.unsqueeze(1))
             _, predicted_classes = torch.max(out, 1)
             all_predictions.extend(predicted_classes.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -114,21 +112,30 @@ def test(model, loader, criterion, num_classes):
     return accuracy, sensitivity, specificity, average_loss
 
 
+def main():
+    model = CNN()
+    model.to(device)
+    loss_function = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
 
+    num_epochs = 1000
 
+    # Training and validation
+    for i in range(num_epochs):
+        for batch in train_data:
+            train(model, batch, loss_function, optimizer)
+        for batch in validation_data:
+            accuracy, sensitivity, specificity, loss = test(model, batch, loss_function, 2)
+        print(f'Epoch: {i}, Accuracy: {accuracy.item():.4f}, Sensibilité: {sensitivity.mean().item():.4f}, Spécificité: {specificity.mean().item():.4f}, Loss: {loss:.4f}')
 
-# Run for 200 epochs
+    # Test
+    for batch in test_data:
+        accuracy, sensitivity, specificity, loss = test(model, batch, loss_function, 2)
+        print(f'Valeur du test: Accuracy: {accuracy.item():.4f}, Sensibilité: {sensitivity.mean().item():.4f}, Spécificité: {specificity.mean().item():.4f}, Loss: {loss:.4f}')
 
-for i in range(num_epochs):
-    for batch in train_data:
-        train(model, batch, loss_function, optimizer)
-    for batch in validation_data:
-        accuracy, sensitivity, specificity, loss = test(model, batch, loss_function, 6)
-    print(f'Epoch: {i}, Accuracy: {accuracy:.4f}, Sensibilité: {sensitivity:.4f}, Spécificité: {specificity:.4f}, Loss: {loss:.4f}')
-
-# # Test
-accuracy, sensitivity, specificity, loss = test(model, test_data, loss_function)
-print(f'Valeur du test: Accuracy: {accuracy:.4f}, Sensibilité: {sensitivity:.4f}, Spécificité: {specificity:.4f}, Loss: {loss:.4f}')
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    main()
 
 # fig, ax = plt.subplots()
 # ax.plot(epochs, tot_train_loss, label = "Train loss")
